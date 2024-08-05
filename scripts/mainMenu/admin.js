@@ -1,80 +1,74 @@
-import * as mc from "@minecraft/server"
-import * as ui from "@minecraft/server-ui"
-import * as util from "../util"
-import data from "./data"
-const playerRanks = database.get("playerRanks")
-  if (!playerRanks) return database.set("playerRanks", [])
-export function main(player) {
-  new ActionFormData()
-  .title("Simple | Admin menu")
-  .button("Set Spawn", "textures/ui/icon_deals")
-  .button("Toggle Feature", "textures/ui/toggle_on")
-  .button("Set Rank", "textures/ui/mashup_world")
-  .button("Ban Players", "textures/ui/hammer_r")
-  .button("Warp Settings", "textures/ui/world_glyph_color_2x_black_outline")
-  .button("Redeem Code", "textures/ui/icon_book_writable")
-  .button("Get Reports", "textures/ui/Feedback")
-  .show(player).then(res => {
-    if (res.cancelled) return
-    
-    if (res.selection == 0) setSpawn(player)
-    if (res.selection == 1) toggleFeature(player)
-    if (res.selection == 2) setRank(player)
-    if (res.selection == 3) banPlayer(player)
-    if (res.selection == 4) warpMenu(player)
-    if (res.selection == 5) redeemCode(player)
-    if (res.selection == 6) reports(player)
+import { world, system } from "@minecraft/server"
+import { ModalFormData, ActionFormData } from "@minecraft/server-ui"
+import { buttons } from "./buttons"
+import * as code from "../system/code"
+import * as report from "../system/report"
+import * as npc from "../system/npc"
+import { textEditor } from "../functions/floating/index"
+import DB from "../lib/Database"
+import * as util from "../lib/game"
+import * as spawn from "../system/spawn"
+import * as warp from "../system/warp"
+import * as ban from "../system/ban"
+
+export function adminMenu(player) {
+  new ActionFormData()   
+  .title('Simple | Admin menu')
+  .button('Set Lobby', 'textures/ui/icon_deals')
+  .button('Enable Disable', 'textures/ui/toggle_on')
+  .button('Set Ranks', 'textures/ui/mashup_world')
+  .button('Ban Players', 'textures/ui/hammer_r')
+  .button('UnBan Players', 'textures/ui/hammer_r')
+  .button('Warp Settings', 'textures/ui/world_glyph_color_2x_black_outline')
+  .button('Redeem Code', 'textures/ui/icon_book_writable')
+  .button('Get Reports', 'textures/ui/Feedback')
+  .button('Spawn Npc', 'textures/ui/icon_deals')
+  .button('Edit Leaderboard', 'textures/items/diamond_sword')
+  .show(player).then(res => {  
+    if (res.selection === 0) spawn.setSpawn(player)
+    if (res.selection === 1) enable(player)
+    if (res.selection === 2) ChangeRank(player)    
+    if (res.selection === 3) ban.ban(player)
+    if (res.selection === 4) ban.unBan(player)
+    if (res.selection === 5) warp.warpSetting(player)  
+    if (res.selection === 6) code.redeem(player)
+    if (res.selection === 7) report.get(player)    
+    if (res.selection === 8) npc.spawn(player)
+    if (res.selection === 9) textEditor(player)
   })
 }
 
-function setSpawn(player) {
-  util.lobby.set("spawn", player.location)
-  util.succes(player, `Succesfully set the spawn position to your position`)
-}
-
-function toggleFeature(player) {
-  const features = util.getFeatures()
-  const form = new ActionFormData()
-  .title("Features")
-  data.buttons.forEach((v) => {
-    if (features[v.id])
-      form.button(`${data.enabledColor}${v.name}\n§r§eTap to Toggle`, v.icon)
-    else
-      from.button(`${data.disabledColor}${v.name}\n§r§eTap to Toggle`, data.disabledIcon)
-  })
-  form.show(player).then(res => {
-    if (res.cancelled) return
-    
-    util.succes(player, `Set ${data.buttons[res.selection]} to ${!getFeature(data.buttons[res.selection].id)}}`)
-    util.setFeature(data.buttons[res.selection].id, !util.getFeature(data.buttons[res.selection].id))
+//Settings ajh
+function enable(player) {
+  let features = util.getFeatures()
+  const ui = new ModalFormData()
+  .title("Enabled")
+  buttons.forEach((v) => ui.toggle(v.display, features[v.id] ?? true))
+  ui.show(player).then(res => {
+    if (res.canceled) return
+    res.formValues.forEach((v, i) => features[buttons[i].id] = v)
+    DB.set("features", features)
   })
 }
 
-function setRank(player) {
-  const players = mc.world.getAllPlayers()
-  let form = new ui.ActionFormData()
-  .title("Set Rank")
-  .body("Select one of the player that you want to set their rank")
-  players.forEach((v) => form.button(`${v.name}\nTap to Select}`))
-  form.show(player).then(res => {
-    if (res.cancelled) return
-    
-    const selPlayer = players[res.selection]
-    form = new ui.ModalFormData()
-    .title("Enter the rank name")
-    .textField("Name", "the rank name", util.getRank(selPlayer) ?? "")
-    .show(player).then(r => {
-      if (r.cancelled || !r.formValues[0]) return
-      
-      if (r.formValues[0] == "") return util.failed(player, "Rank not set because the name is blank")
-      util.succes(player, `Set §b${selPlayer.name}'s §arank to §e${res.formValues[0]}`)
-      util.setRank(selPlayer, r.formValues[0])
-    })
-  })
-}
 
-function banPlayer(player) {
-  const form = ui.ActionFormData()
-  .title("Select player")
-  
-}
+system.runInterval(() => {
+  for (let player of world.getPlayers()) {
+    const banPlayer = DB.get("bannedPlayer")?.find(f => f.id == player.id) ?? {}
+    const cooldown = banPlayer.time ?? 0
+
+    if (cooldown > Date.now()) {
+      const secondsRemaining = Math.ceil((cooldown - Date.now()) / 1000)
+      system.run(a => ban.banned(player))
+      player.runCommandAsync('ability @s mute true')
+      const opt = { amplifier: 255, showParticles: false }
+      player.addEffect('blindness', secondsRemaining, opt)
+      player.addEffect('slowness', secondsRemaining, opt)
+      player.addEffect('resistance', secondsRemaining, opt)
+    } else {
+      let banPlayers = DB.get("bannedPlayer")?.filter(f => f.id !== player.id)
+      player.runCommandAsync('ability @s mute false')
+      DB.set("bannedPlayer", banPlayers)
+    }
+  }
+}, 10)
