@@ -1,2 +1,0 @@
-import "./land";
-import "./main";
